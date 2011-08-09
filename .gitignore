@@ -1,0 +1,14 @@
+#ignore python's compiled files
+*.pyc
+
+# Ignore the honcore symlink
+honcore
+
+#ignore the log file
+*.log
+
+# Ignore config
+config.py
+
+# Ignore TODO
+TODO
