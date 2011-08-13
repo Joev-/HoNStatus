@@ -237,14 +237,15 @@ def main():
 	db.connect(config.dbhost, config.dbuser, config.dbpass, config.dbname)
 	
 	hon_monitor = HoNStatus()
-	hon_monitor.configure()
-		
+	
 	test_count = 1
 	while True:
 		try:
 			log.info("Running test #" + str(test_count))
 			
-			login_status, login_reason = hon_monitor.login_test()
+            hon_monitor.configure()
+			
+            login_status, login_reason = hon_monitor.login_test()
 			log.info("Login server:	" + login_status + " - " + login_reason)
 			chat_status, chat_reason = hon_monitor.chat_test()
 			log.info("Chat server:	" + chat_status + " - " + chat_reason)
