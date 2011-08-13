@@ -21,6 +21,5 @@ def query(query, args=[]):
 def execute(query, args=[]):
 	cursor = database.cursor()
 	affected = cursor.execute(query, args)
-	database.commit()
 	cursor.close()
 	return affected

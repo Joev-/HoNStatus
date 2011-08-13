@@ -26,7 +26,9 @@ class HoNStatus:
 
 		log.info("Loading configuration from the database...")
 		settings = dict(db.query("""SELECT `key`, `value`  FROM settings"""))
-			
+	
+		log.info("Config loaded")
+		log.info("Account: %s    HoN Version: %s    Chat Port: %s    Protocol: %s" % (settings['username'], settings['honver'], settings['chatport'], settings['chatver']))
 		if 'username' in settings:
 			acc_config['username'] = settings['username']
 			
