@@ -28,7 +28,7 @@ class HoNStatus:
 		settings = dict(db.query("""SELECT `key`, `value`  FROM settings"""))
 	
 		log.info("Config loaded")
-		log.info("Account: %s    HoN Version: %s    Chat Port: %s    Protocol: %s" % (settings['username'], settings['honver'], settings['chatport'], settings['chatver']))
+		log.info("Account: %s     HoN Version: %s    Chat Port: %s    Protocol: %s" % (settings['username'], settings['honver'], settings['chatport'], settings['chatver']))
 		if 'username' in settings:
 			acc_config['username'] = settings['username']
 			
@@ -243,9 +243,9 @@ def main():
 		try:
 			log.info("Running test #" + str(test_count))
 			
-            hon_monitor.configure()
+			hon_monitor.configure()
 			
-            login_status, login_reason = hon_monitor.login_test()
+			login_status, login_reason = hon_monitor.login_test()
 			log.info("Login server:	" + login_status + " - " + login_reason)
 			chat_status, chat_reason = hon_monitor.chat_test()
 			log.info("Chat server:	" + chat_status + " - " + chat_reason)
