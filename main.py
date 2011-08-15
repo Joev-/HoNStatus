@@ -250,15 +250,14 @@ def main():
             chat_status, chat_reason = hon_monitor.chat_test()
             log.info("Chat server:  " + chat_status + " - " + chat_reason)
             
+            # Parse motd data each test
+            try:
+                hon_monitor.motd_parser()
+            except MasterServerError, e:
+                if e.code == 108:
+                    log.error('Could not obtain motd data from the master server, not parsing.')
+
             if login_status == "Up" and chat_status == "Up" and hon_monitor.client.is_logged_in():
-
-                # Parse motd data once on each log in.
-                try:
-                    hon_monitor.motd_parser()
-                except MasterServerError, e:
-                    if e.code == 108:
-                        log.error('Could not obtain motd data from the master server, not parsing.')
-
                 # Keep the main thread busy until logged out.
                 timer = 0
                 while hon_monitor.client.is_connected():
@@ -266,16 +265,10 @@ def main():
                     if timer >= 300:
                         hon_monitor.disconnect_logout()
                     else:
-                        try:
-                            time.sleep(1)
-                        except ChatServerError, e:
-                            log.error(e)
-                            log.error("Server connection broken. New test in 30 seconds")
-                            hon_monitor.disconnect_logout()
-                            time.sleep(29)
+                        time.sleep(1)
 
                 # Client disconnected, let it cool down.
-                time.sleep(1)
+                time.sleep(2)
             else:
                 # Start dropping the players online to zero once it's been determined that the servers are down.
                 if down_count > 5:
