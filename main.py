@@ -1,21 +1,36 @@
 #!/usr/bin/env python
 """ HoN Server monitor (HoNMonitor). """
 
-import sys, threading, signal, re, time
-from os import getpid, uname
+import sys, os, threading, signal, re, time, urllib
+from os import getpid, uname, path
 from setproctitle import setproctitle
 from daemon import Daemon
-from honcore import * 
-from core import *
+try:
+    from honcore.client import HoNClient
+    from honcore.constants import *
+    from honcore.exceptions import *
+except ImportError:
+    print "Could not find the honcore library, please ensure it is available."
+from core import log, events, db
 import config
 
 acc_config = {"username" : "", "password" : ""}
 basic_config = {"masterserver" : None, "honver" : None}
 down_count = 0
 
-class HoNStatus:
+class HoNStatus(HoNClient):
     def __init__(self):
-        self.client = client.HoNClient()
+        super(HoNStatus, self).__init__()
+        self.logged_in = False
+        self.setup_events()
+
+    def setup_events(self):
+        self.connect_event(HON_SC_TOTAL_ONLINE, events.on_total_online)
+        self.connect_event(HON_SC_PING, events.on_ping)
+
+    @property
+    def is_logged_in(self):
+        return self.logged_in
 
     def configure(self):
         """ 
@@ -28,7 +43,7 @@ class HoNStatus:
         settings = dict(db.query("""SELECT `key`, `value`  FROM settings"""))
     
         log.info("Config loaded")
-        log.info("Account: %s     HoN Version: %s    Chat Port: %s    Protocol: %s" % (settings['username'], settings['honver'], settings['chatport'], settings['chatver']))
+        log.info("HoN Version: %s    Chat Port: %s    Protocol: %s" % (settings['honver'], settings['chatport'], settings['chatver']))
         if 'username' in settings:
             acc_config['username'] = settings['username']
             
@@ -48,7 +63,7 @@ class HoNStatus:
             if key in basic_config:
                 basic_config[key] = settings[key]
             
-        self.client.configure(chatport=settings['chatport'], chatver=settings['chatver'], invis=settings['invis'],
+        self._configure(chatport=settings['chatport'], protocol=settings['chatver'], invis=settings['invis'],
                         masterserver=settings['masterserver'], basicserver=settings['basicserver'], honver=settings['honver'])
 
 # def connectivity_test(url, port):
@@ -58,7 +73,7 @@ class HoNStatus:
 #   """
 
     def login_test(self):
-        """ The aim of this test is to retrieve the cookie and auth has from the master server.
+        """ The aim of this test is to retrieve the cookie and auth hash from the master server.
             First the master server should be checked for basic connectivity.
             A basic ping is likely not possible because the server would drop ICMP requests and can be seen
             in the results below.
@@ -73,7 +88,7 @@ class HoNStatus:
         note = ""
 
         try:
-            response = self.client.login(acc_config['username'], acc_config['password'])
+            response = self._login(acc_config['username'], acc_config['password'])
             status = "Up"
             note = "Login server is OK."
         except MasterServerError, e:
@@ -88,13 +103,9 @@ class HoNStatus:
         status = ""
         note = ""
 
-        if not self.client.is_logged_in():
-            status = "Down"
-            note = "Not logged in with an account. Is the login server down?"
-        
         global down_count
         try:
-            response = self.client.chat_connect()
+            response = self._chat_connect()
             status = "Up"
             note = "Chat server is OK."
             down_count = 0
@@ -107,27 +118,11 @@ class HoNStatus:
         return status, note
 
     def disconnect_logout(self):
-        try:
-            # TODO: Handle response from chat_disconnect
-            if self.client.is_connected():
-                log.info("Disconnecting from chat server")
-                self.client.chat_disconnect()
-            else:
-                log.info("Not connected to the chat server")
-        except ChatServerError, e:
-            pass
+        log.info("Disconnecting from chat server")
+        self._chat_disconnect()
         
-        try:
-            # TODO: Handle requester response for logging out
-            if self.client.is_logged_in():
-                log.info("Logging out")
-                self.client.logout()
-            else:
-                log.info("Not logged in")
-        except MasterServerError, e:
-            if e.code == 106:
-                log.error('Logout was forced, master server did receive the logout request.')
-
+        log.info("Logging out")
+        self._logout()
 
     def motd_parser(self):
         """ Retrieves the dictionary of message of the day(s(?)) 
@@ -152,8 +147,9 @@ class HoNStatus:
                 url = 'http://' + ''.join(url)
 
             return '<a href=' + url + ' class=' + colour + ' target="_blank">' + url + '</a>'
-
-        motd_list = self.client.motd_get()
+        
+        motd_data = self.motd_get()
+        motd_list = motd_data['motd_list']
 
         # Iterate over the list in reverse because entries are retrieved in order newest -> oldest
         # and must be entered into the database oldest -> newest.
@@ -232,6 +228,15 @@ class HoNStatus:
                     db.execute("""INSERT INTO motds (title, author, date, body) VALUES(%s, %s, %s, %s)""", [motd['title'], motd['author'], motd['date'], motd['body']])
                     log.info("Added new message of the day - %s - %s" % (motd['title'], motd['date']))
 
+        # Get the image from S2 for the motd.
+        # Save it to static/img/motd/ if it does not exist.
+        image_file = motd_data['image'].split("`")[0]
+        image_name = re.search(r'\/([a-f0-9]+.jpg)', image_file).group(1)
+        if not os.path.isfile(os.path.join(config.motd_img_dir, image_name)):
+            urllib.urlretrieve(image_file, os.path.join(config.motd_img_dir, image_name)) 
+            # Set the image name in the database so it can be retrieved.
+            db.execute("""UPDATE `motd_extra` SET `value`=%s WHERE `key`=%s""", [image_name, 'image'])
+            log.info("New MOTD image.")
 
 def main():
     db.connect(config.dbhost, config.dbuser, config.dbpass, config.dbname)
@@ -240,71 +245,77 @@ def main():
     
     test_count = 1
     while True:
-        try:
-            log.info("Running test #" + str(test_count))
-            
-            hon_monitor.configure()
-            
-            login_status, login_reason = hon_monitor.login_test()
-            log.info("Login server: " + login_status + " - " + login_reason)
-            chat_status, chat_reason = hon_monitor.chat_test()
-            log.info("Chat server:  " + chat_status + " - " + chat_reason)
-            
-            # Parse motd data each test
-            try:
-                hon_monitor.motd_parser()
-            except MasterServerError, e:
-                if e.code == 108:
-                    log.error('Could not obtain motd data from the master server, not parsing.')
+        log.info("Running test #" + str(test_count))
 
-            if login_status == "Up" and chat_status == "Up" and hon_monitor.client.is_logged_in():
-                # Keep the main thread busy until logged out.
-                timer = 0
-                while hon_monitor.client.is_connected():
-                    timer += 1
-                    if timer >= 300:
-                        hon_monitor.disconnect_logout()
-                    else:
-                        time.sleep(1)
-
-                # Client disconnected, let it cool down.
-                time.sleep(2)
-            else:
-                # Start dropping the players online to zero once it's been determined that the servers are down.
-                if down_count > 5:
-                    db.execute("""INSERT INTO players (time, value) VALUES (%s, %s)""", [str(int(time.time())), 0])
-                time.sleep(90)
-        except ChatServerError, e:
-            log.error("%s New test in 30 seconds." % e.error)
-            hon_monitor.disconnect_logout()
-            time.sleep(30)
-        test_count += 1
-    
-class HSDaemon(Daemon):
-    def run(self):
-        print "Starting HoN monitor daemon"
-        log.info("Starting up...")
-        print "Monitor started %s" % pname
-        log.info("Monitor started: %s" % pname)
-        main()
-    
-    def stop(self):
-        # Get the pid from the pidfile
+        # Reconfigure the monitor.
+        hon_monitor.configure()
+        
+        login_status, login_reason = hon_monitor.login_test()
+        log.info("Login server: %s - %s" % (login_status, login_reason))
+        chat_status, chat_reason = hon_monitor.chat_test()
+        log.info("Chat Server: %s - %s" % (chat_status, chat_reason))
+        
+        # MotD data can be checked each test, regardless of the server statuses.
         try:
-            pf = file(self.pidfile,'r')
-            pid = int(pf.read().strip())
-            pf.close()
-        except IOError:
-            pid = None
-            
-        if pid:
-            print "Stopping HoN monitor daemon..."
-            log.info("Stopping HoN monitor daemon...")
-            super(HSDaemon, self).stop()
-            print "Monitor stopped"
-            log.info("Monitor stopped")
+            hon_monitor.motd_parser()
+        except MasterServerError, e:
+            if e.code == 108:
+                log.error('Could not obtain MotD data from the Master server')
+
+        # Check that all tests returned good, otherwise the test fails and should
+        # be re-attempted in 90 seconds
+        if login_status is "Up" and chat_status is "Up":
+            hon_monitor.logged_in = True
+            timer = 0
+            while hon_monitor.is_logged_in:
+                timer += 1
+                if timer >= 300:
+                    hon_monitor.disconnect_logout()
+                    break
+                else:
+                    time.sleep(1)
+
+            # Client disconnected, cool down for a moment
+            log.debug("Client disconnected, cooling..")
+            time.sleep(2)
         else:
-            print "pidfile %s does not exist. Is the daemon running?" % self.pidfile
+            # Start dropping the players online to zero once it's been determined that
+            # the servers are down.
+            if down_count > 5:
+                db.execute("""INSERT INTO players (time, value) VALUES (%s, %s)""", [str(int(time.time())), 0])
+            time.sleep(90)
+
+        # Loop increment
+        test_count += 1
+
+        # And log back out again
+        hon_monitor.logged_in = False
+
+#class HSDaemon(Daemon):
+    #def run(self):
+        #print "Starting HoN monitor daemon"
+        #log.info("Starting up...")
+        #print "Monitor started %s" % pname
+        #log.info("Monitor started: %s" % pname)
+        #main()
+    
+    #def stop(self):
+        ## Get the pid from the pidfile
+        #try:
+            #pf = file(self.pidfile,'r')
+            #pid = int(pf.read().strip())
+            #pf.close()
+        #except IOError:
+            #pid = None
+            
+        #if pid:
+            #print "Stopping HoN monitor daemon..."
+            #log.info("Stopping HoN monitor daemon...")
+            #super(HSDaemon, self).stop()
+            #print "Monitor stopped"
+            #log.info("Monitor stopped")
+        #else:
+            #print "pidfile %s does not exist. Is the daemon running?" % self.pidfile
 
 #def sigint_handler(signum,  frame):
     #"""Handles SIGINT signal (<C-c>). Quits program."""
@@ -315,23 +326,26 @@ class HSDaemon(Daemon):
 if __name__ == "__main__":
     # Set up some global stuff.
     #signal.signal(signal.SIGINT, sigint_handler)
-    log.add_logger('/var/python/HoNStatus/honstatus_mon.log', 'INFO', False)
+    log.add_logger('/var/python/HoNStatus/honstatus_mon.log', 'ERROR', False)
     pname = "hon_monitor:%s:%s" % (uname()[1], getpid())
     setproctitle(pname)
+    print "HoN Monitor started"
+    main()
+    print "HoN Monitor stopped"
 
     # Daemonise the program.
-    daemon = HSDaemon('/tmp/hon_monitor:%s' % uname()[1])
-    if len(sys.argv) == 2:
-        if sys.argv[1] == 'start':
-            daemon.start()
-        elif sys.argv[1] == 'stop':
-            daemon.stop()
-        elif sys.argv[1] == 'restart':
-            daemon.restart()
-        else:
-            print "Unknown command"
-            sys.exit(2)
-        sys.exit(0)
-    else:
-        print "Usage: %s start|stop|restart" % sys.argv[0]
-        sys.exit(2)
+    #daemon = HSDaemon('/tmp/hon_monitor:%s' % uname()[1])
+    #if len(sys.argv) == 2:
+        #if sys.argv[1] == 'start':
+            #daemon.start()
+        #elif sys.argv[1] == 'stop':
+            #daemon.stop()
+        #elif sys.argv[1] == 'restart':
+            #daemon.restart()
+        #else:
+            #print "Unknown command"
+            #sys.exit(2)
+        #sys.exit(0)
+    #else:
+        #print "Usage: %s start|stop|restart" % sys.argv[0]
+        #sys.exit(2)
