@@ -66,12 +66,6 @@ class HoNStatus(HoNClient):
         self._configure(chatport=settings['chatport'], protocol=settings['chatver'], invis=settings['invis'],
                         masterserver=settings['masterserver'], basicserver=settings['basicserver'], honver=settings['honver'])
 
-# def connectivity_test(url, port):
-#   """ 
-#   Since ICMP pings are blocked by the masterserver and chat server opening a basic socket 
-#   connection is the best way to check their connectivity.
-#   """
-
     def login_test(self):
         """ The aim of this test is to retrieve the cookie and auth hash from the master server.
             First the master server should be checked for basic connectivity.
@@ -151,6 +145,8 @@ class HoNStatus(HoNClient):
         motd_data = self.motd_get()
         motd_list = motd_data['motd_list']
 
+        ## NOTE: This entire thing is fairly broken due to glows, and when retards use rainbows in their text.
+
         # Iterate over the list in reverse because entries are retrieved in order newest -> oldest
         # and must be entered into the database oldest -> newest.
         for motd in motd_list[::-1]:
@@ -178,24 +174,6 @@ class HoNStatus(HoNClient):
             # Find all basic colour codes eg ^y or ^r or ^o and replace with inline html
             r = re.compile(r"\^([a-z]{1})")
             motd['body'] = r.sub(r"<span class='\1'>", motd['body'])
-
-            # # Replace ^r with <span class="r"> - Red
-            # motd['body'] = motd['body'].replace("^r", "<span class='r'>")
-
-            # # Replace ^g with <span class="g"> - Green
-            # motd['body'] = motd['body'].replace("^g", "<span class='g'>")
-
-            # # Replace ^y with <span class="y"> - Yellow
-            # motd['body'] = motd['body'].replace("^y", "<span class='y'>")
-
-            # # Replace ^m with <span class="m"> - Magneta
-            # motd['body'] = motd['body'].replace("^m", "<span class='m'>")
-
-            # # Replace ^c with <span class="c"> - Cyan
-            # motd['body'] = motd['body'].replace("^c", "<span class='c'>")
-
-            # # Replace ^p with <span class="p"> - Pink
-            # motd['body'] = motd['body'].replace("^p", "<span class='p'>")
             
             # Replace \r\n with <br />
             motd['body'] = motd['body'].replace("\r\n", "<br />")
@@ -291,41 +269,14 @@ def main():
         # And log back out again
         hon_monitor.logged_in = False
 
-#class HSDaemon(Daemon):
-    #def run(self):
-        #print "Starting HoN monitor daemon"
-        #log.info("Starting up...")
-        #print "Monitor started %s" % pname
-        #log.info("Monitor started: %s" % pname)
-        #main()
-    
-    #def stop(self):
-        ## Get the pid from the pidfile
-        #try:
-            #pf = file(self.pidfile,'r')
-            #pid = int(pf.read().strip())
-            #pf.close()
-        #except IOError:
-            #pid = None
-            
-        #if pid:
-            #print "Stopping HoN monitor daemon..."
-            #log.info("Stopping HoN monitor daemon...")
-            #super(HSDaemon, self).stop()
-            #print "Monitor stopped"
-            #log.info("Monitor stopped")
-        #else:
-            #print "pidfile %s does not exist. Is the daemon running?" % self.pidfile
+def sigint_handler(signal, frame):
+    """ Basic SIGINT quit """
+    log.info("Quitting...")
+    sys.exit(0)
 
-#def sigint_handler(signum,  frame):
-    #"""Handles SIGINT signal (<C-c>). Quits program."""
-    #disconnect_logout()
-    #log.info("Quitting...")
-    #sys.exit(0)
-    
 if __name__ == "__main__":
     # Set up some global stuff.
-    #signal.signal(signal.SIGINT, sigint_handler)
+    signal.signal(signal.SIGINT, sigint_handler)
     log.add_logger('/var/python/HoNStatus/honstatus_mon.log', 'ERROR', False)
     pname = "hon_monitor:%s:%s" % (uname()[1], getpid())
     setproctitle(pname)
@@ -333,19 +284,3 @@ if __name__ == "__main__":
     main()
     print "HoN Monitor stopped"
 
-    # Daemonise the program.
-    #daemon = HSDaemon('/tmp/hon_monitor:%s' % uname()[1])
-    #if len(sys.argv) == 2:
-        #if sys.argv[1] == 'start':
-            #daemon.start()
-        #elif sys.argv[1] == 'stop':
-            #daemon.stop()
-        #elif sys.argv[1] == 'restart':
-            #daemon.restart()
-        #else:
-            #print "Unknown command"
-            #sys.exit(2)
-        #sys.exit(0)
-    #else:
-        #print "Usage: %s start|stop|restart" % sys.argv[0]
-        #sys.exit(2)
