@@ -36,7 +36,7 @@ That should leave you ready to run the program.
 
 ## Web Front-End
 
-The front end for the website is available at [HoNStatus-Frontend](http://github.com/Joev-/HoNStatus-Frontend). Please note that the code is very scrappy and has been pending a re-write for many a months.
+The front end for the website is available at request, it needs a large amount of cleaning up that I will do at a later point.
 
 ## License
 
