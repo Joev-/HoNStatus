@@ -24,8 +24,8 @@ SET SQL_MODE="NO_AUTO_VALUE_ON_ZERO";
 --
 
 INSERT INTO `settings` (`id`, `name`, `key`, `value`) VALUES
-(1, 'Account Username', 'username', 'GrepMyLilCat'),
-(2, 'Account Password', 'password', '447c06247a5fe5df38f0d51e375273e8'),
+(1, 'Account Username', 'username', 'userName'),
+(2, 'Account Password', 'password', 'md5password'),
 (3, 'Invisible', 'invis', 'True'),
 (4, 'HoN Client Version', 'honver', '2.1.10.0'),
 (5, 'Chat Port', 'chatport', '11031'),
